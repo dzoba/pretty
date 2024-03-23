@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Caffeine Art</title>
+  <style>
+    body,
+    html {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      background-color: #f0f0f0;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let clickPosition = null;
+    let isMouseDown = false;
+    let speedMultiplier = 1;
+    let isDarkTheme = true;
+
+
+
+    let width = canvas.width = window.innerWidth;
+    let height = canvas.height = window.innerHeight;
+
+    window.addEventListener('resize', function () {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+      init();
+    });
+
+    const circles = [];
+    const grid = [];
+    const cellSize = 50; // Size of the grid cells
+    let gridWidth, gridHeight;
+
+    let circleCount = 250;
+    let baseRadius = 4;
+    let maxRadius = 12.5;
+    const maxSpeed = 1;
+    const repulsionDistance = 30;
+    const pullStrength = 0.02;
+    const repulsionStrength = 0.4;
+    const friction = 0.985;
+    const pulseInterval = 3500;
+    const pulseDuration = 400;
+
+    let lastPulseTime = 0;
+
+    function Circle(x, y) {
+      this.x = x;
+      this.y = y;
+      this.vx = (Math.random() - 0.5) * maxSpeed;
+      this.vy = (Math.random() - 0.5) * maxSpeed;
+      this.currentRadius = baseRadius;
+
+      this.draw = function () {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.currentRadius, 0, Math.PI * 2);
+        const strokeWidth = (this.currentRadius - baseRadius) / (maxRadius - baseRadius) * 2 - .5;
+        ctx.lineWidth = strokeWidth;
+        ctx.strokeStyle = isDarkTheme ? '#ccc' : '#333'; // Light color for dark theme, and vice versa
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = isDarkTheme ? "rgba(204, 204, 204, 0.6)" : "rgba(51, 51, 51, 0.6)"; // Adjust shadow color based on theme
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.shadowBlur = 0;
+      };
+
+      this.update = function (timestamp, grid) {
+        this.vx *= friction;
+        this.vy *= friction;
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        const dx = this.x - width / 2;
+        const dy = this.y - height / 2;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance > 0) {
+          this.vx -= (dx / distance) * pullStrength;
+          this.vy -= (dy / distance) * pullStrength;
+        }
+      };
+    }
+
+    function updateCircles(timestamp) {
+      // Clear the grid
+      for (let y = 0; y < gridHeight; y++) {
+        for (let x = 0; x < gridWidth; x++) {
+          grid[y][x] = [];
+        }
+      }
+
+      // Assign circles to grid cells
+      circles.forEach(circle => {
+        const gridX = Math.floor(circle.x / cellSize);
+        const gridY = Math.floor(circle.y / cellSize);
+        if (grid[gridY] && grid[gridY][gridX]) {
+          grid[gridY][gridX].push(circle);
+        }
+      });
+
+      // Update circles and apply repulsion within their grid cells and adjacent cells
+      circles.forEach(circle => {
+        const gridX = Math.floor(circle.x / cellSize);
+        const gridY = Math.floor(circle.y / cellSize);
+
+        for (let yOffset = -1; yOffset <= 1; yOffset++) {
+          for (let xOffset = -1; xOffset <= 1; xOffset++) {
+            const xCheck = gridX + xOffset;
+            const yCheck = gridY + yOffset;
+            if (xCheck >= 0 && yCheck >= 0 && yCheck < grid.length && xCheck < grid[0].length) {
+              grid[yCheck][xCheck].forEach(otherCircle => {
+                if (circle !== otherCircle) {
+                  const dx = circle.x - otherCircle.x;
+                  const dy = circle.y - otherCircle.y;
+                  const distance = Math.sqrt(dx * dx + dy * dy);
+                  if (distance < repulsionDistance && distance > 0) {
+                    circle.vx += (dx / distance) * repulsionStrength;
+                    circle.vy += (dy / distance) * repulsionStrength;
+                  }
+                }
+              });
+            }
+          }
+        }
+
+        circle.update(timestamp);
+
+        // Pulse and drawing logic
+        const elapsed = (timestamp - lastPulseTime) % pulseInterval;
+        const waveFront = (width + height) / 2 * (elapsed / pulseInterval);
+        const dx = circle.x - width / 2;
+        const dy = circle.y - height / 2;
+        const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+        const delayFactor = distanceFromCenter / 100;
+        const wavePosition = elapsed - delayFactor * pulseDuration;
+
+        if (wavePosition > 0 && wavePosition < pulseDuration) {
+          const pulseProgress = Math.sin((wavePosition / pulseDuration) * Math.PI);
+          circle.currentRadius = baseRadius + (maxRadius - baseRadius) * pulseProgress;
+        } else {
+          circle.currentRadius = baseRadius;
+        }
+      });
+    }
+
+    function applyClickForce() {
+      if (clickPosition) {
+        const repulsionStrength = .25;
+        const maxDistance = 200;
+        circles.forEach(circle => {
+          const dx = circle.x - clickPosition.x;
+          const dy = circle.y - clickPosition.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < maxDistance) {
+            const force = Math.max(maxDistance - distance, 0) / maxDistance * repulsionStrength;
+            circle.vx += dx / distance * force;
+            circle.vy += dy / distance * force;
+          }
+        });
+        clickPosition = null;
+      }
+    }
+
+    function init() {
+      circles.length = 0;
+
+      // Determine if the device might be mobile based on screen width
+      const isMobile = window.innerWidth < 768;
+
+      // Adjust circle count and base radius for mobile devices
+      circleCount = isMobile ? 125 : 250;
+      baseRadius = isMobile ? 2 : 4;
+      maxRadius = isMobile ? 6.25 : 12.5;
+
+      gridWidth = Math.ceil(width / cellSize);
+      gridHeight = Math.ceil(height / cellSize);
+
+      for (let y = 0; y < gridHeight; y++) {
+        grid[y] = [];
+        for (let x = 0; x < gridWidth; x++) {
+          grid[y][x] = [];
+        }
+      }
+
+      for (let i = 0; i < circleCount; i++) {
+        const x = Math.random() * width;
+        const y = Math.random() * height;
+        circles.push(new Circle(x, y));
+      }
+    }
+
+
+    function animate(timestamp) {
+      if (!lastPulseTime) lastPulseTime = timestamp;
+      ctx.clearRect(0, 0, width, height);
+      applyClickForce();
+      updateCircles(timestamp);
+      circles.forEach(circle => {
+        circle.draw();
+      });
+      requestAnimationFrame(animate);
+    }
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'i') {
+        isDarkTheme = !isDarkTheme;
+        // You might want to update the canvas immediately
+        // to reflect the theme change without waiting for the next animation frame.
+        updateTheme();
+      }
+    });
+
+    canvas.addEventListener('mousedown', function (event) {
+      isMouseDown = true;
+      setClickPosition(event);
+    });
+
+    canvas.addEventListener('mousemove', function (event) {
+      if (isMouseDown) {
+        setClickPosition(event);
+      }
+    });
+
+    canvas.addEventListener('mouseup', function () {
+      isMouseDown = false;
+      clickPosition = null;
+    });
+
+    function setClickPosition(event) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+
+      clickPosition = {
+        x: (event.clientX - rect.left) * scaleX,
+        y: (event.clientY - rect.top) * scaleY
+      };
+    }
+
+    canvas.addEventListener('touchmove', function (event) {
+      event.preventDefault();
+      if (isMouseDown) {
+        setTouchPosition(event);
+      }
+    }, { passive: false });
+
+    let lastTapTime = 0;
+    const doubleTapInterval = 300; // 300 milliseconds for double tap interval
+
+    // Modify the touchstart event listener to detect double taps
+    canvas.addEventListener('touchstart', function (event) {
+      event.preventDefault();
+      const currentTime = Date.now();
+      const timeSinceLastTap = currentTime - lastTapTime;
+      if (timeSinceLastTap < doubleTapInterval && timeSinceLastTap > 0) {
+        // Detected a double tap
+        isDarkTheme = !isDarkTheme;
+        updateTheme(); // Apply theme change
+      }
+      lastTapTime = currentTime;
+
+      // Existing touch handling logic
+      isMouseDown = true;
+      setTouchPosition(event);
+    }, { passive: false });
+
+    // You might also want to modify the touchend event if needed, for example:
+    canvas.addEventListener('touchend', function () {
+      isMouseDown = false;
+      clickPosition = null;
+      // No changes needed here for theme toggling, but you can add if there's any related logic
+    });
+
+    function setTouchPosition(event) {
+      const touch = event.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+
+      clickPosition = {
+        x: (touch.clientX - rect.left) * scaleX,
+        y: (touch.clientY - rect.top) * scaleY
+      };
+    }
+
+    function updateTheme() {
+      canvas.style.backgroundColor = isDarkTheme ? '#333' : '#f0f0f0'; // Dark background for dark theme, and light for default
+      // Redraw circles immediately to reflect the theme change
+      ctx.clearRect(0, 0, width, height);
+      circles.forEach(circle => circle.draw());
+    }
+
+    updateTheme();
+    init();
+    requestAnimationFrame(animate);
+  </script>
+</body>
+
+</html>
